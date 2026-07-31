@@ -25,6 +25,27 @@ def collection_or_404(collection_id: str):
     return COLLECTIONS[collection_id]
 
 
+# ---- Null-handling defaults ----
+# ArcGIS infers its field schema from the FIRST feature it reads. If a field is
+# null in that row, ArcGIS drops the field entirely from the layer's schema,
+# even if later rows have real values. To avoid this, we replace nulls with a
+# safe, type-appropriate default before returning the response.
+FIELD_DEFAULTS = {
+    "funding": "",
+    "grid_solar": "",
+    "request_date": "",  # empty string placeholder; ArcGIS treats this as a valid (blank) date field
+    "lag_days": 0,
+    "delay_reason": "",
+}
+
+
+def apply_field_defaults(row_dict: dict) -> dict:
+    for field, default in FIELD_DEFAULTS.items():
+        if field in row_dict and row_dict[field] is None:
+            row_dict[field] = default
+    return row_dict
+
+
 # ---- 1. Landing page ----
 @router.get("/")
 def landing_page(request: Request):
@@ -140,6 +161,7 @@ def collection_items(
         row_dict = dict(row)
         geometry = row_dict.pop("geojson_geometry")
         row_dict.pop(geom_field, None)  # drop raw geometry, keep only GeoJSON version
+        row_dict = apply_field_defaults(row_dict)
         features.append({
             "type": "Feature",
             "id": row_dict.get(id_field),
@@ -190,6 +212,7 @@ def collection_item(collection_id: str, feature_id: str, db: Session = Depends(g
     row_dict = dict(row)
     geometry = row_dict.pop("geojson_geometry")
     row_dict.pop(geom_field, None)
+    row_dict = apply_field_defaults(row_dict)
 
     return {
         "type": "Feature",
