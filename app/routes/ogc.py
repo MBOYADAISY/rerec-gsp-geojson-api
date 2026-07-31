@@ -115,6 +115,16 @@ def collection_items(
         where_clause = f"WHERE {geom_field} && ST_MakeEnvelope(:minx, :miny, :maxx, :maxy, 4326)"
         params.update({"minx": minx, "miny": miny, "maxx": maxx, "maxy": maxy})
 
+    # --- total count of matching records (for numberMatched / pagination) ---
+    count_query = text(f"""
+        SELECT COUNT(*) AS total
+        FROM {table}
+        {where_clause};
+    """)
+    count_params = {k: v for k, v in params.items() if k not in ("limit", "offset")}
+    total_count = db.execute(count_query, count_params).scalar()
+
+    # --- actual page of features ---
     query = text(f"""
         SELECT *, ST_AsGeoJSON({geom_field})::json AS geojson_geometry
         FROM {table}
@@ -138,13 +148,24 @@ def collection_items(
         })
 
     base = str(request.base_url).rstrip("/")
+    links = [
+        {"href": f"{base}/collections/{collection_id}/items", "rel": "self", "type": "application/geo+json"},
+    ]
+
+    # add a "next" link if there are more records beyond this page
+    next_offset = offset + limit
+    if next_offset < total_count:
+        next_url = f"{base}/collections/{collection_id}/items?limit={limit}&offset={next_offset}"
+        if bbox:
+            next_url += f"&bbox={bbox}"
+        links.append({"href": next_url, "rel": "next", "type": "application/geo+json"})
+
     return {
         "type": "FeatureCollection",
-        "features": features,
+        "numberMatched": total_count,
         "numberReturned": len(features),
-        "links": [
-            {"href": f"{base}/collections/{collection_id}/items", "rel": "self", "type": "application/geo+json"},
-        ],
+        "features": features,
+        "links": links,
     }
 
 
