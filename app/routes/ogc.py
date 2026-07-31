@@ -8,6 +8,11 @@ router = APIRouter(tags=["OGC API - Features"])
 
 # ---- Collection registry ----
 # Add more entries here later to expose more views/tables as ArcGIS layers.
+#
+# "geom_expression" is optional — if omitted, the raw geometry_field is used as-is.
+# Use it when you want ArcGIS to receive a cheaper/simpler geometry (e.g. a
+# centroid point instead of a full polygon) while still reading from the same
+# underlying view/table.
 COLLECTIONS = {
     "project-stage-detail": {
         "table": "rerec_geospatial.vw_project_stage_detail",
@@ -15,7 +20,16 @@ COLLECTIONS = {
         "geometry_field": "geometry",
         "title": "Project Stage Detail",
         "description": "Project stage progress with geometry",
-    }
+    },
+    "project-stage-detail-points": {
+        "table": "rerec_geospatial.vw_project_stage_detail",
+        "id_field": "project_reference_code",
+        "geometry_field": "geometry",
+        "geom_expression": "ST_Centroid(geometry)",
+        "title": "Project Stage Detail (Points)",
+        "description": "Lightweight point version of Project Stage Detail — same attributes, "
+                        "centroid geometry instead of full polygons, for fast attribute-focused use in ArcGIS.",
+    },
 }
 
 
@@ -122,6 +136,7 @@ def collection_items(
     table = meta["table"]
     id_field = meta["id_field"]
     geom_field = meta["geometry_field"]
+    geom_expr = meta.get("geom_expression", geom_field)
 
     limit = max(1, min(limit, 1000))  # cap to protect the server
 
@@ -133,7 +148,7 @@ def collection_items(
             minx, miny, maxx, maxy = [float(v) for v in bbox.split(",")]
         except ValueError:
             raise HTTPException(status_code=400, detail="bbox must be minx,miny,maxx,maxy")
-        where_clause = f"WHERE {geom_field} && ST_MakeEnvelope(:minx, :miny, :maxx, :maxy, 4326)"
+        where_clause = f"WHERE {geom_expr} && ST_MakeEnvelope(:minx, :miny, :maxx, :maxy, 4326)"
         params.update({"minx": minx, "miny": miny, "maxx": maxx, "maxy": maxy})
 
     # --- total count of matching records (for numberMatched / pagination) ---
@@ -147,7 +162,7 @@ def collection_items(
 
     # --- actual page of features ---
     query = text(f"""
-        SELECT *, ST_AsGeoJSON({geom_field})::json AS geojson_geometry
+        SELECT *, ST_AsGeoJSON({geom_expr})::json AS geojson_geometry
         FROM {table}
         {where_clause}
         ORDER BY {id_field}
@@ -198,9 +213,10 @@ def collection_item(collection_id: str, feature_id: str, db: Session = Depends(g
     table = meta["table"]
     id_field = meta["id_field"]
     geom_field = meta["geometry_field"]
+    geom_expr = meta.get("geom_expression", geom_field)
 
     query = text(f"""
-        SELECT *, ST_AsGeoJSON({geom_field})::json AS geojson_geometry
+        SELECT *, ST_AsGeoJSON({geom_expr})::json AS geojson_geometry
         FROM {table}
         WHERE {id_field} = :feature_id;
     """)
