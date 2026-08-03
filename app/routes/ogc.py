@@ -201,12 +201,9 @@ def collection_items(
             ST_AsGeoJSON({geom_expr})::json AS geojson_geometry
         FROM {table}
         {where_clause}
-        RDER BY ({geom_expr} IS NULL), {id_field}
+        ORDER BY ({geom_expr} IS NULL), {id_field}
         LIMIT :limit OFFSET :offset;
     """)
-
-
-
 
     base = str(request.base_url).rstrip("/")
 
@@ -236,16 +233,13 @@ def collection_items(
             geometry = row_dict.pop("geojson_geometry")
             row_dict.pop(geom_field, None)
             row_dict = apply_field_defaults(row_dict)
-            
+            feature_id = row_dict.pop("ogc_id")
             feature = {
                 "type": "Feature",
                 "id": feature_id,
                 "geometry": geometry,
                 "properties": row_dict,
             }
-
-            feature_id = row_dict.pop("ogc_id")
-
             if not first:
                 yield ","
             yield json.dumps(feature, default=str)
