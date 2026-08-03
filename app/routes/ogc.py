@@ -196,7 +196,7 @@ def collection_items(
 
     query = text(f"""
         SELECT
-            CONCAT(project_reference_code, '-', stage_id) AS ogc_id,
+            CONCAT(project_reference_code, '-', stage_order) AS ogc_id,
             *,
             ST_AsGeoJSON({geom_expr})::json AS geojson_geometry
         FROM {table}
