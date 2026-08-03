@@ -195,12 +195,18 @@ def collection_items(
     total_count = db.execute(count_query, count_params).scalar()
 
     query = text(f"""
-        SELECT *, ST_AsGeoJSON({geom_expr})::json AS geojson_geometry
+        SELECT
+            CONCAT(project_reference_code, '-', stage_id) AS ogc_id,
+            *,
+            ST_AsGeoJSON({geom_expr})::json AS geojson_geometry
         FROM {table}
         {where_clause}
-        ORDER BY ({geom_expr} IS NULL), {id_field}
+        RDER BY ({geom_expr} IS NULL), {id_field}
         LIMIT :limit OFFSET :offset;
     """)
+
+
+
 
     base = str(request.base_url).rstrip("/")
 
@@ -230,12 +236,16 @@ def collection_items(
             geometry = row_dict.pop("geojson_geometry")
             row_dict.pop(geom_field, None)
             row_dict = apply_field_defaults(row_dict)
+            
             feature = {
                 "type": "Feature",
-                "id": row_dict.get(id_field),
+                "id": feature_id,
                 "geometry": geometry,
                 "properties": row_dict,
             }
+
+            feature_id = row_dict.pop("ogc_id")
+
             if not first:
                 yield ","
             yield json.dumps(feature, default=str)
