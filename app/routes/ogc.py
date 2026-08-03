@@ -22,13 +22,6 @@ COLLECTIONS = {
         "geometry_field": "geometry",
         "title": "Project Stage Detail",
         "description": "Project stage progress with geometry",
-        # Geometry now only exists on the Digitization-stage row for each
-        # project (see the view definition) -- Route/Wayleave/Pegging rows
-        # have geometry = NULL. ArcGIS infers whether a layer is spatial
-        # from the first feature it reads, so a NULL-geometry row first
-        # can make it treat the whole layer as non-spatial. Restricting
-        # this collection to rows that actually have geometry avoids that.
-        "extra_where": "geometry IS NOT NULL",
     },
     # "project-stage-detail-points": {
     #     "table": "rerec_geospatial.vw_project_stage_detail",
@@ -59,12 +52,26 @@ def collection_or_404(collection_id: str):
 # ArcGIS infers its field schema from the FIRST feature it reads. If a field is
 # null in that row, ArcGIS drops the field entirely from the layer's schema,
 # even if later rows have real values. To avoid this, we replace nulls with a
-# safe, type-appropriate default before returning the response.
+# safe, type-appropriate default before returning the response. Covers every
+# nullable column in vw_project_stage_detail so no field ever gets dropped.
 FIELD_DEFAULTS = {
+    "project_reference_number": "",
+    "project_name": "",
+    "region": "",
+    "county": "",
+    "constituency": "",
     "funding": "",
     "grid_solar": "",
-    "request_date": "",  # empty string placeholder; ArcGIS treats this as a valid (blank) date field
+    "project_category": "",
+    "financial_year": "",
+    "request_date": "",
+    "approval_date": "",
+    "completion_date": "",
     "lag_days": 0,
+    "turnaround_days": 0,
+    "days_in_current_stage": 0,
+    "officer_id": 0,
+    "officer_name": "",
     "delay_reason": "",
 }
 
