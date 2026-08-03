@@ -198,7 +198,7 @@ def collection_items(
         SELECT *, ST_AsGeoJSON({geom_expr})::json AS geojson_geometry
         FROM {table}
         {where_clause}
-        ORDER BY {id_field}
+        ORDER BY ({geom_expr} IS NULL), {id_field}
         LIMIT :limit OFFSET :offset;
     """)
 
