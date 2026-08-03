@@ -38,8 +38,8 @@ COLLECTIONS = {
 # much data ends up on the ArcGIS map -- ArcGIS follows the "next" link and
 # keeps paging automatically until it has every record, it just does it in
 # more, smaller requests instead of fewer, larger ones.
-MAX_LIMIT = 200
-DEFAULT_LIMIT = 100
+MAX_LIMIT = 15000
+DEFAULT_LIMIT = 15000
 
 
 def collection_or_404(collection_id: str):
