@@ -21,15 +21,14 @@ COLLECTIONS = {
         "title": "Project Stage Detail",
         "description": "Project stage progress with geometry",
     },
-    "project-stage-detail-points": {
-        "table": "rerec_geospatial.vw_project_stage_detail",
-        "id_field": "project_reference_code",
-        "geometry_field": "geometry",
-        "geom_expression": "ST_Centroid(geometry)",
-        "title": "Project Stage Detail (Points)",
-        "description": "Lightweight point version of Project Stage Detail — same attributes, "
-                        "centroid geometry instead of full polygons, for fast attribute-focused use in ArcGIS.",
-    },
+    # "project-stage-detail-points": {
+    #     "table": "rerec_geospatial.vw_project_stage_detail",
+    #     "id_field": "project_reference_code",
+    #     "geometry_field": "geometry",
+    #     "geom_expression": "ST_Centroid(geometry)",
+    #     "title": "Project Stage Detail (Points)",
+    #     "description": "Lightweight point version...",
+    # },
 }
 
 
