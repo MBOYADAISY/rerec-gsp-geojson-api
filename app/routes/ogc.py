@@ -22,6 +22,13 @@ COLLECTIONS = {
         "geometry_field": "geometry",
         "title": "Project Stage Detail",
         "description": "Project stage progress with geometry",
+        # Geometry now only exists on the Digitization-stage row for each
+        # project (see the view definition) -- Route/Wayleave/Pegging rows
+        # have geometry = NULL. ArcGIS infers whether a layer is spatial
+        # from the first feature it reads, so a NULL-geometry row first
+        # can make it treat the whole layer as non-spatial. Restricting
+        # this collection to rows that actually have geometry avoids that.
+        "extra_where": "geometry IS NOT NULL",
     },
     # "project-stage-detail-points": {
     #     "table": "rerec_geospatial.vw_project_stage_detail",
@@ -155,16 +162,22 @@ def collection_items(
 
     limit = max(1, min(limit, MAX_LIMIT))
 
-    where_clause = ""
+    conditions = []
     params = {"limit": limit, "offset": offset}
+
+    extra_where = meta.get("extra_where")
+    if extra_where:
+        conditions.append(extra_where)
 
     if bbox:
         try:
             minx, miny, maxx, maxy = [float(v) for v in bbox.split(",")]
         except ValueError:
             raise HTTPException(status_code=400, detail="bbox must be minx,miny,maxx,maxy")
-        where_clause = f"WHERE {geom_expr} && ST_MakeEnvelope(:minx, :miny, :maxx, :maxy, 4326)"
+        conditions.append(f"{geom_expr} && ST_MakeEnvelope(:minx, :miny, :maxx, :maxy, 4326)")
         params.update({"minx": minx, "miny": miny, "maxx": maxx, "maxy": maxy})
+
+    where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     count_query = text(f"""
         SELECT COUNT(*) AS total
@@ -238,10 +251,11 @@ def collection_item(collection_id: str, feature_id: str, db: Session = Depends(g
     geom_field = meta["geometry_field"]
     geom_expr = meta.get("geom_expression", geom_field)
 
+    query_extra = f" AND ({meta['extra_where']})" if meta.get("extra_where") else ""
     query = text(f"""
         SELECT *, ST_AsGeoJSON({geom_expr})::json AS geojson_geometry
         FROM {table}
-        WHERE {id_field} = :feature_id;
+        WHERE {id_field} = :feature_id{query_extra};
     """)
     row = db.execute(query, {"feature_id": feature_id}).mappings().first()
 
