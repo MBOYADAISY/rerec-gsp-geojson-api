@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, Request, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+import json
 
 from app.services.database import get_db
 
@@ -30,6 +32,14 @@ COLLECTIONS = {
     #     "description": "Lightweight point version...",
     # },
 }
+
+# Max rows any single request can return. Lowered from 1000 -> 200 to keep
+# per-request memory use safe on a 512MB instance. This does NOT reduce how
+# much data ends up on the ArcGIS map -- ArcGIS follows the "next" link and
+# keeps paging automatically until it has every record, it just does it in
+# more, smaller requests instead of fewer, larger ones.
+MAX_LIMIT = 200
+DEFAULT_LIMIT = 100
 
 
 def collection_or_404(collection_id: str):
@@ -122,12 +132,18 @@ def collection_detail(collection_id: str, request: Request):
 
 
 # ---- 5. Items (the actual features) ----
+# Streams the response instead of building the full feature list in memory
+# first. On a 512MB instance, buffering ~200 rows of heavy MultiPolygon
+# geometry as Python objects (row dicts + feature dicts + the final JSON
+# string) before sending anything was likely what pushed memory over the
+# limit -- streaming means only one row's worth of data needs to be in
+# memory at any given moment while the response is sent.
 @router.get("/collections/{collection_id}/items")
 def collection_items(
     collection_id: str,
     request: Request,
     db: Session = Depends(get_db),
-    limit: int = 100,
+    limit: int = DEFAULT_LIMIT,
     offset: int = 0,
     bbox: str = None,
 ):
@@ -137,7 +153,7 @@ def collection_items(
     geom_field = meta["geometry_field"]
     geom_expr = meta.get("geom_expression", geom_field)
 
-    limit = max(1, min(limit, 1000))  # cap to protect the server
+    limit = max(1, min(limit, MAX_LIMIT))
 
     where_clause = ""
     params = {"limit": limit, "offset": offset}
@@ -150,7 +166,6 @@ def collection_items(
         where_clause = f"WHERE {geom_expr} && ST_MakeEnvelope(:minx, :miny, :maxx, :maxy, 4326)"
         params.update({"minx": minx, "miny": miny, "maxx": maxx, "maxy": maxy})
 
-    # --- total count of matching records (for numberMatched / pagination) ---
     count_query = text(f"""
         SELECT COUNT(*) AS total
         FROM {table}
@@ -159,7 +174,6 @@ def collection_items(
     count_params = {k: v for k, v in params.items() if k not in ("limit", "offset")}
     total_count = db.execute(count_query, count_params).scalar()
 
-    # --- actual page of features ---
     query = text(f"""
         SELECT *, ST_AsGeoJSON({geom_expr})::json AS geojson_geometry
         FROM {table}
@@ -168,27 +182,11 @@ def collection_items(
         LIMIT :limit OFFSET :offset;
     """)
 
-    rows = db.execute(query, params).mappings().all()
-
-    features = []
-    for row in rows:
-        row_dict = dict(row)
-        geometry = row_dict.pop("geojson_geometry")
-        row_dict.pop(geom_field, None)  # drop raw geometry, keep only GeoJSON version
-        row_dict = apply_field_defaults(row_dict)
-        features.append({
-            "type": "Feature",
-            "id": row_dict.get(id_field),
-            "geometry": geometry,
-            "properties": row_dict,
-        })
-
     base = str(request.base_url).rstrip("/")
+
     links = [
         {"href": f"{base}/collections/{collection_id}/items", "rel": "self", "type": "application/geo+json"},
     ]
-
-    # add a "next" link if there are more records beyond this page
     next_offset = offset + limit
     if next_offset < total_count:
         next_url = f"{base}/collections/{collection_id}/items?limit={limit}&offset={next_offset}"
@@ -196,13 +194,39 @@ def collection_items(
             next_url += f"&bbox={bbox}"
         links.append({"href": next_url, "rel": "next", "type": "application/geo+json"})
 
-    return {
-        "type": "FeatureCollection",
-        "numberMatched": total_count,
-        "numberReturned": len(features),
-        "features": features,
-        "links": links,
-    }
+    def generate():
+        yield '{"type": "FeatureCollection", '
+        yield f'"numberMatched": {total_count}, '
+        yield '"features": ['
+
+        # server_side_cursors: execute() returns a result we iterate row by
+        # row rather than calling .all(), so SQLAlchemy/psycopg doesn't need
+        # to materialize every row in memory before we start streaming.
+        result = db.execute(query, params)
+        first = True
+        count = 0
+        for row in result.mappings():
+            row_dict = dict(row)
+            geometry = row_dict.pop("geojson_geometry")
+            row_dict.pop(geom_field, None)
+            row_dict = apply_field_defaults(row_dict)
+            feature = {
+                "type": "Feature",
+                "id": row_dict.get(id_field),
+                "geometry": geometry,
+                "properties": row_dict,
+            }
+            if not first:
+                yield ","
+            yield json.dumps(feature, default=str)
+            first = False
+            count += 1
+
+        yield f'], "numberReturned": {count}, '
+        yield '"links": ' + json.dumps(links)
+        yield '}'
+
+    return StreamingResponse(generate(), media_type="application/geo+json")
 
 
 # ---- 6. Single feature by ID ----
